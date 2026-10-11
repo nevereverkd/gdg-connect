@@ -85,4 +85,5 @@ No Cloud Functions billing plan is necessary for the current feature scope: Fire
 `LiveFlowTest` uses instrumentation arguments `testEmail` and `testPassword` for a temporary Firebase user, and checks live sign-in, event loading, reservation and cancellation. Build `:app:assembleDebugAndroidTest` and select `com.gdg.connect.LiveFlowTest`. The optimized release is checked separately through Android UI interactions because minification removes APIs needed by the Compose test runner. Delete the temporary user after testing. Credentials must never be placed in the source or the APK.
 
 Dependency references: [Firebase Android release notes](https://firebase.google.com/support/release-notes/android), [Kotlin/R8 compatibility](https://developer.android.com/build/kotlin-support). R8 is explicitly aligned with Kotlin 2.4.
-# gdg-connect
+# GDG-CONNECT
+~By Bhaveshh & Sachin 
