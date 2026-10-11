@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1098411304786",
+    "project_id": "gdg-connect-sv-20261011",
+    "storage_bucket": "gdg-connect-sv-20261011.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1098411304786:android:5c3c400d227b12cbbabc8b",
+        "android_client_info": {
+          "package_name": "com.gdg.connect"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZuvH_4quRHLy3ozfHt3wZCe5pHyykODY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

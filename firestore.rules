@@ -1,0 +1,54 @@
+rules_version = '2';
+// events/{eventId}: Admin SDK publishes validated event metadata (title, description,
+// startsAt/endsAt timestamps, venue, price, hosts, organizingClub, tags, zone,
+// sample/published booleans, capacity 1..100000, reserved 0..capacity).
+// Client can change ONLY reserved, linked to its own atomic registration write.
+// users/{uid}/registrations/{eventId}: uid/eventId strings 1..128 (immutable),
+// createdAt timestamp equal to server request.time. No extras. No client updates.
+// users/{uid} is a namespace, not a stored profile. Email stays in Firebase Auth.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    function eventPath(eventId) { return /databases/$(database)/documents/events/$(eventId); }
+    function registrationPath(uid, eventId) { return /databases/$(database)/documents/users/$(uid)/registrations/$(eventId); }
+    function validRegistration(d, uid, eventId) {
+      return d.keys().hasAll(['uid', 'eventId', 'createdAt']) && d.keys().hasOnly(['uid', 'eventId', 'createdAt'])
+        && d.uid is string && d.uid.size() > 0 && d.uid.size() <= 128 && d.uid == uid
+        && d.eventId is string && d.eventId.size() > 0 && d.eventId.size() <= 128 && d.eventId == eventId
+        && d.createdAt is timestamp && d.createdAt == request.time;
+    }
+    function validCounter(d) {
+      return d.reserved is int && d.capacity is int && d.capacity >= 1 && d.capacity <= 100000
+        && d.reserved >= 0 && d.reserved <= d.capacity;
+    }
+    function validCounterChange(eventId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let rp = registrationPath(request.auth.uid, eventId);
+      return validCounter(after) && after.diff(before).affectedKeys().hasOnly(['reserved'])
+        && before.startsAt > request.time
+        && ((before.published == true && after.reserved == before.reserved + 1
+              && !exists(rp) && existsAfter(rp) && validRegistration(getAfter(rp).data, request.auth.uid, eventId))
+          || (after.reserved == before.reserved - 1 && exists(rp) && !existsAfter(rp)));
+    }
+    match /events/{eventId} {
+      allow read: if signedIn() && resource.data.published == true;
+      allow update: if signedIn() && validCounterChange(eventId);
+      allow create, delete: if false;
+    }
+    match /users/{uid}/registrations/{eventId} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && validRegistration(request.resource.data, uid, eventId)
+        && get(eventPath(eventId)).data.published == true
+        && get(eventPath(eventId)).data.startsAt > request.time
+        && getAfter(eventPath(eventId)).data.reserved == get(eventPath(eventId)).data.reserved + 1
+        && validCounter(getAfter(eventPath(eventId)).data);
+      allow delete: if owner(uid) && get(eventPath(eventId)).data.startsAt > request.time
+        && getAfter(eventPath(eventId)).data.reserved == get(eventPath(eventId)).data.reserved - 1
+        && validCounter(getAfter(eventPath(eventId)).data);
+      allow update: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

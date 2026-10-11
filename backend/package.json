@@ -1,0 +1,14 @@
+{
+  "name": "gdg-connect-backend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test rules.test.mjs auth.test.mjs",
+    "seed": "node seed.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.5.0",
+    "firebase": "^12.0.0",
+    "@firebase/rules-unit-testing": "^5.0.0"
+  }
+}

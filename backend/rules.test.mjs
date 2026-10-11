@@ -1,0 +1,30 @@
+import {readFileSync} from 'node:fs';
+import {before,after,beforeEach,test} from 'node:test';
+import assert from 'node:assert/strict';
+import {initializeTestEnvironment,assertFails,assertSucceeds} from '@firebase/rules-unit-testing';
+import {doc,collection,getDoc,getDocs,query,where,setDoc,updateDoc,deleteDoc,writeBatch,runTransaction,Timestamp,serverTimestamp} from 'firebase/firestore';
+let env;
+const event=(o={})=>({title:'Sample Kotlin meetup',description:'Test event',startsAt:Timestamp.fromMillis(Date.now()+86400000),endsAt:Timestamp.fromMillis(Date.now()+90000000),venue:'Mumbai',price:'Free',hosts:['Test host'],organizingClub:'Test GDG',tags:['Kotlin'],zone:'Asia/Kolkata',sample:true,published:true,capacity:2,reserved:0,...o});
+const user=uid=>env.authenticatedContext(uid).firestore();
+const ep=db=>doc(db,'events','test');
+const rp=(db,uid='alice')=>doc(db,'users',uid,'registrations','test');
+async function seed(o={}){await env.withSecurityRulesDisabled(async c=>setDoc(ep(c.firestore()),event(o)));}
+function booking(db,uid='alice',o={}){const b=writeBatch(db);b.update(ep(db),{reserved:1});b.set(rp(db,uid),{uid,eventId:'test',createdAt:serverTimestamp(),...o});return b.commit();}
+before(async()=>{env=await initializeTestEnvironment({projectId:'demo-gdg-connect',firestore:{host:'127.0.0.1',port:8080,rules:readFileSync(new URL('../firestore.rules',import.meta.url),'utf8')}});});
+beforeEach(async()=>{await env.clearFirestore();await seed();});
+after(async()=>env?.cleanup());
+test('public reads and writes denied',async()=>{const db=env.unauthenticatedContext().firestore();await assertFails(getDoc(ep(db)));await assertFails(getDocs(collection(db,'events')));await assertFails(booking(db));});
+test('published feed allowed, unrestricted and unpublished reads denied',async()=>{const db=user('alice');await assertSucceeds(getDocs(query(collection(db,'events'),where('published','==',true))));await assertFails(getDocs(collection(db,'events')));await seed({published:false});await assertFails(getDoc(ep(db)));});
+test('atomic booking saves one seat and owner can query schedule',async()=>{const db=user('alice');await assertSucceeds(booking(db));assert.equal((await getDoc(ep(db))).data().reserved,1);await assertSucceeds(getDocs(collection(db,'users','alice','registrations')));});
+test('standalone seat count and registration writes denied',async()=>{const db=user('alice');await assertFails(updateDoc(ep(db),{reserved:1}));await assertFails(setDoc(rp(db),{uid:'alice',eventId:'test',createdAt:serverTimestamp()}));});
+test('duplicate booking and count replay denied',async()=>{const db=user('alice');await booking(db);await assertFails(booking(db));await assertFails(updateDoc(ep(db),{reserved:2}));});
+test('other user cannot read, cancel, or create owner reservation',async()=>{await booking(user('alice'));const db=user('bob');await assertFails(getDoc(rp(db)));await assertFails(getDocs(collection(db,'users','alice','registrations')));await assertFails(deleteDoc(rp(db)));await assertFails(booking(db,'alice'));});
+test('metadata tampering, admin escalation, event injection denied',async()=>{const db=user('alice');const b=writeBatch(db);b.update(ep(db),{reserved:1,title:'Hijacked'});b.set(rp(db),{uid:'alice',eventId:'test',createdAt:serverTimestamp()});await assertFails(b.commit());await assertFails(setDoc(doc(db,'users','alice'),{admin:true}));await assertFails(setDoc(doc(db,'events','fake'),event()));});
+test('identity, path, type, size and extra-field attacks denied',async()=>{const db=user('alice');for(const o of [{uid:'bob'},{eventId:'other'},{extra:'bad'},{uid:'a'.repeat(1000)},{uid:23},{eventId:'../other'}])await assertFails(booking(db,'alice',o));});
+test('missing fields and forged timestamps denied',async()=>{const db=user('alice');await assertFails(booking(db,'alice',{createdAt:Timestamp.fromMillis(1)}));const b=writeBatch(db);b.update(ep(db),{reserved:1});b.set(rp(db),{uid:'alice',eventId:'test'});await assertFails(b.commit());});
+test('updates including schema corruption denied',async()=>{const db=user('alice');await booking(db);for(const o of [{uid:'bob'},{extra:'x'},{createdAt:Timestamp.now()},{uid:'a'.repeat(10000)}])await assertFails(updateDoc(rp(db),o));});
+test('full, unpublished and past events reject booking',async()=>{const db=user('alice');for(const o of [{capacity:1,reserved:1},{published:false},{startsAt:Timestamp.fromMillis(1)}]){await seed(o);await assertFails(booking(db));}});
+test('atomic cancellation works, unpaired delete denied',async()=>{const db=user('alice');await booking(db);await assertFails(deleteDoc(rp(db)));const b=writeBatch(db);b.update(ep(db),{reserved:0});b.delete(rp(db));await assertSucceeds(b.commit());assert.equal((await getDoc(ep(db))).data().reserved,0);});
+test('negative, overflow, fractional and string counts denied',async()=>{const db=user('alice');for(const n of [-1,200000,'1',1.5]){const b=writeBatch(db);b.update(ep(db),{reserved:n});b.set(rp(db),{uid:'alice',eventId:'test',createdAt:serverTimestamp()});await assertFails(b.commit());}});
+test('missing event and unknown subcollections denied',async()=>{const db=user('alice');await assertFails(setDoc(doc(db,'users','alice','registrations','missing'),{uid:'alice',eventId:'missing',createdAt:serverTimestamp()}));await assertFails(setDoc(doc(db,'users','alice','private','x'),{anything:true}));});
+test('two concurrent bookings for last seat give exactly one success',async()=>{await seed({capacity:1});const reserve=uid=>{const db=user(uid);return runTransaction(db,async t=>{const e=await t.get(ep(db));const r=await t.get(rp(db,uid));if(r.exists()||e.data().reserved>=e.data().capacity)throw Error('Full or duplicate');t.update(ep(db),{reserved:e.data().reserved+1});t.set(rp(db,uid),{uid,eventId:'test',createdAt:serverTimestamp()});});};const results=await Promise.allSettled([reserve('alice'),reserve('bob')]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await getDoc(ep(user('alice')))).data().reserved,1);});

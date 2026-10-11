@@ -1,0 +1,2 @@
+-keepattributes Signature,RuntimeVisibleAnnotations
+-keep class com.gdg.connect.Event { *; }
